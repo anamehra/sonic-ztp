@@ -79,23 +79,23 @@ def signal_handler(signum, frame):
 
 def get_ntp_service_name():
     '''!
-    Detect which NTP service is available on the system.
+    Detect which NTP service is active on the system.
     Checks in priority order: chrony, ntp
 
     Returns:
-        str: Name of the available NTP service, or None if none found
+        str: Name of the active NTP service, or None if none found
     '''
     ntp_services = ['chrony', 'ntp']
     for service in ntp_services:
         try:
-            rc = runCommand('systemctl is-enabled ' + service, capture_stdout=True)
+            rc = runCommand('systemctl is-active --quiet ' + service, capture_stdout=False)
             if rc == 0:
                 logger.info('Detected NTP service: %s' % service)
                 return service
         except:
             continue
 
-    logger.warning('No NTP service detected (ntp/ntpsec/chrony)')
+    logger.warning('No active NTP service detected (ntp/chrony)')
     return None
 
 class ZTPEngine():
@@ -837,8 +837,7 @@ class ZTPEngine():
 
     def __restart_network_services(self):
         '''!
-        Restart the necessary services: stop and start NTP, and restart interfaces-config.
-        Detects which NTP service is available (ntp, ntpsec, or chrony).
+        Restart interfaces-config while rebinding the active NTP service, if any.
         '''
         ntp_service = get_ntp_service_name()
 
@@ -846,13 +845,17 @@ class ZTPEngine():
             logger.info('Stopping %s service...' % ntp_service)
             runCommand('systemctl stop ' + ntp_service, capture_stdout=False)
 
-        logger.info('Restarting interfaces-config service...')
-        runCommand('systemctl restart interfaces-config', capture_stdout=False)
-
-        if ntp_service:
-            logger.info('Starting %s service...' % ntp_service)
-            runCommand('systemctl start ' + ntp_service, capture_stdout=False)
-            logger.info('%s service restarted successfully.' % ntp_service)
+        try:
+            logger.info('Restarting interfaces-config service...')
+            rc = runCommand('systemctl restart interfaces-config', capture_stdout=False)
+            if rc != 0:
+                logger.warning('interfaces-config restart failed with return code %d' % rc)
+            return rc
+        finally:
+            if ntp_service:
+                logger.info('Starting %s service...' % ntp_service)
+                runCommand('systemctl start ' + ntp_service, capture_stdout=False)
+                logger.info('%s service restarted successfully.' % ntp_service)
 
     def executeLoop(self, test_mode=False):
         '''!
